@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reader's Library - High Speed Firestore Scheduler</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+        body {
+            display: flex; justify-content: center; align-items: center; min-height: 100vh;
+            background: linear-gradient(135deg, #0f172a, #1e1b4b, #111827); color: #fff;
+        }
+        .container {
+            width: 100%; max-width: 460px; padding: 30px;
+            background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.5);
+            text-align: center;
+        }
+        h1 { font-size: 26px; margin-bottom: 5px; background: linear-gradient(to right, #c084fc, #6366f1); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .subtitle { font-size: 13px; color: #94a3b8; margin-bottom: 25px; }
+        .form-group { margin-bottom: 20px; text-align: left; }
+        label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #cbd5e1; margin-bottom: 8px; }
+        textarea, input[type="datetime-local"] {
+            width: 100%; padding: 14px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px; color: #fff; font-size: 15px; outline: none;
+        }
+        textarea { height: 110px; resize: none; }
+        button {
+            width: 100%; padding: 15px; background: linear-gradient(135deg, #a855f7, #6366f1); border: none;
+            border-radius: 12px; color: white; font-size: 16px; font-weight: 600; cursor: pointer; transition: 0.3s;
+        }
+        button:hover { opacity: 0.9; }
+        .status { margin-top: 15px; font-size: 14px; display: none; }
+        .live-indicator { margin-top: 20px; padding: 10px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 10px; font-size: 12px; color: #34d399; }
+    </style>
+
+    <!-- Firebase SDK Modules -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs, query, where, updateDoc, doc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // Aapki Real Cloud Firestore Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBGzwB4QnIq3y5wW-1qHPA2cTtqtldiYVs",
+            authDomain: "library-44f36.firebaseapp.com",
+            projectId: "library-44f36",
+            storageBucket: "library-44f36.firebasestorage.app",
+            messagingSenderId: "575295838935",
+            appId: "1:575295838935:web:3c0319126a9c525bdfae92",
+            measurementId: "G-KSW3DYT8Z0"
+        };
+
+        // Initialize Firebase & Firestore
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // Aapki Telegram Details
+        const BOT_TOKEN = "8944851874:AAFQQUt_lW6Z7Q916AVgmhds9Z_uCgioWew";
+        const PRIVATE_CHAT_ID = "-1003853964824";
+
+        // 1. Message Firestore Collection me Save karna
+        window.saveToFirestore = async function() {
+            const text = document.getElementById("msgText").value.trim();
+            const timeVal = document.getElementById("targetTime").value;
+            const statusDiv = document.getElementById("status");
+
+            if (!text || !timeVal) {
+                statusDiv.innerText = "⚠️ Please fill all fields!";
+                statusDiv.style.color = "#f59e0b"; statusDiv.style.display = "block";
+                return;
+            }
+
+            try {
+                // Documents ko 'scheduled_messages' collection me add karna
+                await addDoc(collection(db, "scheduled_messages"), {
+                    message: text,
+                    sendAt: new Date(timeVal).getTime(), // Converts user time to timestamp
+                    status: "pending"
+                });
+
+                statusDiv.innerText = "📅 Message saved in Cloud Firestore successfully!";
+                statusDiv.style.color = "#10b981"; statusDiv.style.display = "block";
+
+                document.getElementById("msgText").value = "";
+                document.getElementById("targetTime").value = "";
+            } catch (err) {
+                statusDiv.innerText = "❌ Firestore Error: " + err.message;
+                statusDiv.style.color = "#ef4444"; statusDiv.style.display = "block";
+            }
+        };
+
+        // 2. ULTRA-FAST BACKGROUND CHECKER (Har 2 Seconds me Engine chalega)
+        async function checkDatabaseAndSend() {
+            const now = Date.now();
+            console.log("Scanning Firestore every 2 seconds...");
+
+            try {
+                // Database query: status pending ho aur time pura ya nikal chuka ho
+                const q = query(collection(db, "scheduled_messages"), where("status", "==", "pending"), where("sendAt", "<=", now));
+                const querySnapshot = await getDocs(q);
+
+                querySnapshot.forEach(async (documentSnapshot) => {
+                    const data = documentSnapshot.data();
+                    const docRef = doc(db, "scheduled_messages", documentSnapshot.id);
+
+                    // Telegram Bot API Request
+                    const telegramUrl = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+                    const response = await fetch(telegramUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            chat_id: PRIVATE_CHAT_ID,
+                            text: data.message,
+                            parse_mode: 'Markdown'
+                        })
+                    });
+
+                    const resData = await response.json();
+                    if (resData.ok) {
+                        // Success ke baad status 'sent' update karein taaki loop ruk sake
+                        await updateDoc(docRef, { status: "sent" });
+                        console.log("Message automatically dispatched to Telegram!");
+                    }
+                });
+            } catch (error) {
+                console.error("Scanning failed: ", error);
+            }
+        }
+
+        // Set interval to 2000ms (Exactly 2 Seconds)
+        setInterval(checkDatabaseAndSend, 2000);
+    </script>
+</head>
+<body>
+    <div class="container">
+        <h1>Reader's Library</h1>
+        <div class="subtitle">Speed-Engine Cloud Firestore Scheduler</div>
+
+        <div class="form-group">
+            <label>Message Text</label>
+            <textarea id="msgText" placeholder="Type your book updates or announcement..."></textarea>
+        </div>
+
+        <div class="form-group">
+            <label>Choose Trigger Date & Time</label>
+            <input type="datetime-local" id="targetTime">
+        </div>
+
+        <button onclick="saveToFirestore()">📅 Schedule Message</button>
+        <div id="status" class="status"></div>
+
+        <div class="live-indicator">
+            ⚡ 2-Sec Live Scanner: Monitoring cloud records continuously.
+        </div>
+    </div>
+</body>
+  </html>
+      
